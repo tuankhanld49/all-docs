@@ -3,7 +3,7 @@ The solution enhances navigation in a TypeScript-based React microfrontend appli
 ### Key Components
 1. **NavigationService**:
    - A class encapsulating navigation logic, including:
-     - **Path Lookup**: Uses `pathRegistry` to map `pathKey` (e.g., `path1`) to paths (e.g., `/path1`).
+     - **Path Lookup**: Uses `pathRegistry` to map `pathKey` (e.g., `path1`) to paths (e.g., `/view-collateral-details`).
      - **Data Validation**: Validates `appData` using `zod` schemas (e.g., `ICollateralPropertySchema`) for complex types and type checks for primitives like `nabValuationId`.
      - **Permission Checking**: Ensures `ICollateralProperty.permissions` includes at least one of the `requiredPermissions` (e.g., `view-collateral`).
      - **Navigation**: Stores `appData` in `ShellContext` and navigates via `react-router-dom`.
@@ -11,8 +11,8 @@ The solution enhances navigation in a TypeScript-based React microfrontend appli
    - Throws errors for invalid paths, data, or permissions, logged with detailed `zod` messages.
 
 2. **Shared Types and Zod Schemas**:
-   - `ICollateralPropertySchema`: Defines `id`, `status`, `valuations` (array), `titles` (array), and `permissions` (string array) using `zod`.
    - `pathRegistry`: Maps paths to required/optional fields (e.g., `property: ICollateralProperty`, `nabValuationId: string`) and `requiredPermissions`.
+   - For example: `ICollateralPropertySchema`: Defines `id`, `status`, `valuations` (array), `titles` (array), and `permissions` (string array) using `zod`.
    - Shared via `shared-types` package using Module Federation.
 
 3. **ShellContext**:
@@ -65,7 +65,7 @@ sequenceDiagram
     User->>MiniApp1: Clicks "Navigate to Path1"
     MiniApp1->>ShellContext: Access navigationService
     ShellContext-->>MiniApp1: Returns navigationService
-    MiniApp1->>NavigationService: navigateTo('path1', { required: { property: { id, status, valuations, titles, permissions: ["view-collateral"] }, nabValuationId }, optional: { theme } })
+    MiniApp1->>NavigationService: navigateTo('path1', collateralProperty: { id, status, valuations, titles }, nabValuationId })
     
     NavigationService->>PathRegistry: Look up 'path1'
     PathRegistry-->>NavigationService: Returns path config
