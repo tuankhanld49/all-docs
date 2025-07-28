@@ -1,468 +1,278 @@
-In your TypeScript-based React microfrontend application, you want to validate that an object (e.g., the `user` attribute in `appData`) is an instance of a complex type like `IUser` without manually checking each property (e.g., `id`, `name`, `email`). This is a common requirement to ensure type safety while keeping validation simple and efficient, especially in the context of your navigation system with `pathRegistry` and `appData`. Below, I’ll provide a solution to validate that an object conforms to the `IUser` interface without property-by-property checks, update the existing `pathRegistry` and `navigate` function to incorporate this validation, and ensure compatibility with your microfrontend architecture. I’ll also address refactoring your `webPath` object and update the Mermaid sequence diagram to reflect the new validation approach.
-
----
-
-### Understanding the Requirement
-- **Goal**: Validate that `appData.required.user` is an instance of `IUser` without checking individual properties like `id`, `name`, or `email`.
-- **Context**: You’re using a `pathRegistry` to define paths and their required/optional fields, with `user` as a complex type `IUser`. The `navigate` function validates `appData` before navigation.
-- **Constraints**:
-  - Avoid manual property checks for scalability and maintainability.
-  - Support quick refactoring of the existing `webPath` object.
-  - Ensure type safety and compatibility with microfrontends (e.g., Module Federation).
-- **Assumption**: `IUser` is defined as:
-  ```typescript
-  interface IUser {
-    id: string;
-    name: string;
-    email?: string;
-  }
-  ```
-  If your `IUser` differs, please share its definition for a tailored solution.
-
----
-
-### Solution: Validate Object as Instance of Type
-In TypeScript, validating that an object is an instance of a complex type like `IUser` without checking individual properties can be achieved using **type predicates**, **type assertions**, or **runtime type checking libraries**. Since you don’t want to check properties manually, I’ll propose a solution using a combination of TypeScript’s type system and a lightweight runtime check to ensure an object matches the `IUser` interface. This will be integrated into the `navigate` function and `pathRegistry` for seamless validation.
-
-#### Approach
-1. **Use a Type Predicate for `IUser`**:
-   - Define a type predicate function (e.g., `isIUser`) that checks if an object conforms to `IUser` without enumerating properties.
-   - Use TypeScript’s type system to narrow the type when validated.
-2. **Integrate with `pathRegistry`**:
-   - Update `FieldConfig` to support complex types like `IUser` with a type predicate instead of a manual validator.
-3. **Update `navigate` Function**:
-   - Validate `appData` fields using type predicates for complex types and simple checks for primitives.
-4. **Refactor `webPath`**:
-   - Provide a script to convert `webPath` into `pathRegistry` with `IUser` as a default complex type.
-5. **Update Sequence Diagram**:
-   - Reflect the new validation approach in the Mermaid diagram.
-
----
-
-#### 1. Define Type Predicate for `IUser`
-A type predicate function checks if an object matches the `IUser` interface and narrows its type in TypeScript. To avoid property-by-property checks, we’ll use a minimal runtime check that ensures the object has the required fields and their types, leveraging TypeScript’s compile-time guarantees.
-
-```typescript
-// types.ts
-export interface IUser {
-  id: string;
-  name: string;
-  email?: string;
-}
-
-export function isIUser(value: any): value is IUser {
-  return (
-    value != null &&
-    typeof value === 'object' &&
-    'id' in value &&
-    typeof value.id === 'string' &&
-    'name' in value &&
-    typeof value.name === 'string' &&
-    (value.email === undefined || typeof value.email === 'string')
-  );
-}
-
-export type PrimitiveType = 'string' | 'number' | 'boolean';
-export type ComplexType = 'IUser'; // Add other complex types as needed
-
-export interface FieldConfig {
-  name: string;
-  type: PrimitiveType | ComplexType;
-  validator?: (value: any) => boolean; // Optional for complex types
-}
-
-export interface AppData {
-  required: Record<string, string | number | boolean | IUser>;
-  optional?: Record<string, any>;
-}
-
-export interface PathConfig {
-  path: string;
-  requiredFields: FieldConfig[];
-  optionalFields?: FieldConfig[];
-}
-
-export const pathRegistry: Record<string, PathConfig> = {
-  path1: {
-    path: '/path1',
-    requiredFields: [
-      { name: 'user', type: 'IUser', validator: isIUser },
-      { name: 'orderId', type: 'string' },
-    ],
-    optionalFields: [{ name: 'theme', type: 'string' }],
-  },
-  path2: {
-    path: '/path2',
-    requiredFields: [{ name: 'userId', type: 'string' }],
-    optionalFields: [{ name: 'categoryId', type: 'number' }],
-  },
-};
-```
-
-**Key Points**:
-- `isIUser` is a type predicate that checks if `value` is an `IUser` by verifying required fields (`id`, `name`) and optional fields (`email`) without deep property enumeration.
-- The `validator` field in `FieldConfig` uses `isIUser` for `IUser` types.
-- TypeScript narrows the type to `IUser` when `isIUser` returns `true`, ensuring type safety.
-
----
-
-#### 2. Update `ShellContext` with Type Predicate Validation
-The `navigate` function uses the `validator` (e.g., `isIUser`) for complex types and simple checks for primitives.
-
-```typescript
-// ShellContext.tsx
-import { createContext, useContext, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { pathRegistry, AppData, FieldConfig, PrimitiveType } from './types';
-
-interface ShellContextType {
-  appData: Record<string, AppData>;
-  navigate: (pathKey: string, data: AppData) => void;
-}
-
-const ShellContext = createContext<ShellContextType | undefined>(undefined);
-
-export const ShellProvider: React.FC = ({ children }) => {
-  const [appData, setAppData] = useState<Record<string, AppData>>({});
-  const navigate = useNavigate();
-
-  const validatePrimitiveType = (field: FieldConfig, value: any): boolean => {
-    switch (field.type as PrimitiveType) {
-      case 'string':
-        return typeof value === 'string';
-      case 'number':
-        return typeof value === 'number';
-      case 'boolean':
-        return typeof value === 'boolean';
-      default:
-        return false;
-    }
-  };
-
-  const customNavigate = (pathKey: string, data: AppData) => {
-    const config = pathRegistry[pathKey];
-    if (!config) {
-      console.error(`Path key "${pathKey}" not found in pathRegistry`);
-      return;
-    }
-
-    const missingFields = config.requiredFields.filter(
-      (field) => !(field.name in data.required)
-    );
-    const invalidTypes = config.requiredFields.filter((field) => {
-      if (!(field.name in data.required)) return false;
-      const value = data.required[field.name];
-      if (field.type === 'IUser' && field.validator) {
-        return !field.validator(value);
-      }
-      return !validatePrimitiveType(field, value);
-    });
-
-    if (missingFields.length > 0) {
-      console.error(
-        `Navigation to ${config.path} failed: Missing required fields: ${missingFields
-          .map((f) => f.name)
-          .join(', ')}`
-      );
-      return;
-    }
-
-    if (invalidTypes.length > 0) {
-      console.error(
-        `Navigation to ${config.path} failed: Invalid types for fields: ${invalidTypes
-          .map((f) => `${f.name} (expected ${f.type})`)
-          .join(', ')}`
-      );
-      return;
-    }
-
-    console.log(`Navigating to ${config.path} with data:`, JSON.stringify(data, null, 2));
-    setAppData((prev) => ({ ...prev, [config.path]: data }));
-    navigate(config.path);
-  };
-
-  return (
-    <ShellContext.Provider value={{ appData, navigate: customNavigate }}>
-      {children}
-    </ShellContext.Provider>
-  );
-};
-
-export const useShell = () => {
-  const context = useContext(ShellContext);
-  if (!context) throw new Error('useShell must be used within ShellProvider');
-  return context;
-};
-```
-
-**Key Points**:
-- The `navigate` function uses `isIUser` for `IUser` fields, avoiding manual property checks.
-- Type predicates ensure TypeScript narrows the type, reducing runtime checks in destination pages.
-- Errors are logged for missing or invalid types (e.g., “Invalid IUser”).
-
----
-
-#### 3. Miniapp Example with `IUser`
-Miniapps pass and retrieve `IUser` with type safety.
-
-```typescript
-// mini-app1/src/App.tsx
-import { useShell } from 'shell/ShellContext';
-import { IUser } from 'shared-types';
-
-const App = () => {
-  const { navigate } = useShell();
-
-  const handleNavigate = () => {
-    const user: IUser = { id: '123', name: 'John Doe', email: 'john@example.com' };
-    navigate('path1', {
-      required: { user, orderId: '456' },
-      optional: { theme: 'dark' },
-    });
-  };
-
-  return <button onClick={handleNavigate}>Go to Path1</button>;
-};
-
-export default App;
-
-// mini-app2/src/App.tsx
-import { useLocation } from 'react-router-dom';
-import { useShell } from 'shell/ShellContext';
-import { IUser, isIUser } from 'shared-types';
-
-const App = () => {
-  const { appData } = useShell();
-  const { pathname } = useLocation();
-  const data = appData[pathname] || { required: {} };
-
-  const user = data.required.user;
-  if (!user || !isIUser(user)) {
-    return <div>Error: Missing or invalid user</div>;
-  }
-
-  return (
-    <div>
-      User: {user.name} (ID: {user.id})
-    </div>
-  );
-};
-
-export default App;
-```
-
-**Key Points**:
-- `MiniApp1` passes a typed `IUser` object, enforced by TypeScript.
-- `MiniApp2` uses `isIUser` to validate `user` at runtime, ensuring type safety.
-
----
-
-#### 4. Refactoring `webPath`
-To refactor your `webPath` object (e.g., `{'path1': '/path1', 'path2': '/path2'}`), use this script to generate a `pathRegistry` with `IUser` as a default complex type.
-
-```typescript
-// generatePathRegistry.ts
-import { PathConfig, FieldConfig, isIUser } from 'shared-types';
-
-const webPath = {
-  path1: '/path1',
-  path2: '/path2',
-  // ... other paths
-};
-
-const defaultRequiredFields: FieldConfig[] = [
-  { name: 'user', type: 'IUser', validator: isIUser },
-];
-
-const pathRegistry = Object.keys(webPath).reduce(
-  (acc, key) => ({
-    ...acc,
-    [key]: {
-      path: webPath[key],
-      requiredFields: defaultRequiredFields,
-      optionalFields: [],
-    },
-  }),
-  {} as Record<string, PathConfig>
-);
-
-console.log(JSON.stringify(pathRegistry, null, 2));
-```
-
-**Steps**:
-1. Run the script to generate `pathRegistry` with `user: IUser` as a default.
-2. Manually add other fields (e.g., `orderId: string`) for each path.
-3. Update navigation calls to use `pathKey` and `IUser` (e.g., `navigate('path1', { required: { user: { id, name } } })`).
-4. Use TypeScript errors and logs to identify paths needing adjustments.
-
----
-
-#### 5. Alternative: Runtime Type Checking Libraries
-If you prefer a more robust solution for validating complex types without property checks, you can use libraries like `zod` or `io-ts`. Here’s an example with `zod`:
-
-```bash
-yarn add zod
-```
-
-```typescript
-// types.ts
-import { z } from 'zod';
-
-export const IUserSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  email: z.string().optional(),
-});
-
-export type IUser = z.infer<typeof IUserSchema>;
-
-export function isIUser(value: any): value is IUser {
-  return IUserSchema.safeParse(value).success;
-}
-
-// Use in pathRegistry as before
-export const pathRegistry: Record<string, PathConfig> = {
-  path1: {
-    path: '/path1',
-    requiredFields: [
-      { name: 'user', type: 'IUser', validator: isIUser },
-      { name: 'orderId', type: 'string' },
-    ],
-    optionalFields: [{ name: 'theme', type: 'string' }],
-  },
-};
-```
-
-**Benefits**:
-- `zod` provides robust validation with detailed error messages (e.g., “Expected string for id, received number”).
-- Simplifies validation for complex types without manual checks.
-- Integrates seamlessly with the existing solution.
-
-**Trade-off**:
-- Adds a dependency (`zod` is ~40kB minified).
-- Slightly more setup for simple cases.
-
-If you prefer `zod` or another library, let me know, and I can provide a full example.
-
----
-
-#### 6. Updated Mermaid Sequence Diagram
-The diagram reflects the use of a type predicate (`isIUser`) for validation.
+### Assumptions
+- **Permission Check**: The `checkPermissions(path: string, requiredPermissions: string[])` method validates permissions based solely on the path name and the `requiredPermissions` from `pathRegistry`. Since you didn’t specify how permissions are sourced, I’ll assume a static permission store (e.g., a mock mapping of paths to user permissions) for now. If permissions are fetched from an API or another source, please provide details.
+- **Path-Based Logic**: Permission checks are only applied for paths with `requiredPermissions` in `pathRegistry`. Paths without `requiredPermissions` skip the check.
+- **No Property Dependency**: The `property` object is still validated with `zod` in `NavigationService`, but it’s not used for permission checks.
+- **Existing Architecture**: The solution integrates with your TypeScript-based React microfrontend application, using `zod`, `ShellContext`, and Module Federation.
+
+### Updated Mermaid Sequence Diagram
+
+The sequence diagram is updated to reflect that `checkPermissions` takes `path` and `requiredPermissions` as arguments, removing the dependency on `ICollateralProperty` for permission validation.
 
 ```mermaid
 sequenceDiagram
     participant User
     participant MiniApp1
     participant ShellContext
+    participant NavigationService
+    participant EntitlementService
     participant PathRegistry
     participant MiniApp2
     participant Router
 
-    User->>MiniApp1: Clicks "Navigate to Path1" button
-    MiniApp1->>ShellContext: Calls navigate('path1', { required: { user: { id: "123", name: "John" }, orderId: "456" }, optional: { theme: "dark" } })
+    User->>MiniApp1: Clicks "Navigate to target-path"
+    MiniApp1->>ShellContext: Access navigationService
+    ShellContext-->>MiniApp1: Returns navigationService
+    MiniApp1->>NavigationService: navigateTo('/target-path', { property: { id, status, valuations, titles }, nabValuationId })
     
-    ShellContext->>PathRegistry: Look up config for 'path1'
-    PathRegistry-->>ShellContext: Returns { path: '/path1', requiredFields: [{name: 'user', type: 'IUser'}, {name: 'orderId', type: 'string'}] }
-    
-    ShellContext->>ShellContext: Validate fields (isIUser for user, type for orderId)
-    alt Validation passes
-        ShellContext->>ShellContext: Log navigation details
-        ShellContext->>ShellContext: Store appData
-        ShellContext->>Router: Navigate to '/path1'
-        
-        Router->>MiniApp2: Render MiniApp2
-        MiniApp2->>ShellContext: Retrieve appData
-        ShellContext-->>MiniApp2: Returns { required: { user: { id: "123", name: "John" }, orderId: "456" }, optional: { theme: "dark" } }
-        MiniApp2->>MiniApp2: Validate user with isIUser (optional)
-        alt Data valid
-            MiniApp2->>User: Display user.name
-        else Data invalid
-            MiniApp2->>User: Display error
+    NavigationService->>PathRegistry: Look up 'target-path'
+    PathRegistry-->>NavigationService: Returns path config (path, requiredFields, requiredPermissions)
+    NavigationService->>NavigationService: Validate fields (zod) and nabValuationId
+    alt Valid data
+        alt Path requires permissions
+            NavigationService->>EntitlementService: checkPermissions('/target-path', requiredPermissions)
+            alt Valid permissions
+                EntitlementService-->>NavigationService: Returns true
+                NavigationService->>ShellContext: Store appData
+                NavigationService->>Router: Navigate to '/target-path'
+                Router->>MiniApp2: Render MiniApp2
+                MiniApp2->>ShellContext: Retrieve appData
+                MiniApp2->>MiniApp2: Validate property (zod)
+                alt Data valid
+                    MiniApp2->>User: Display property details
+                else Data invalid
+                    MiniApp2->>User: Display error
+                end
+            else Invalid permissions
+                EntitlementService->>NavigationService: Throw error (Insufficient permissions)
+                NavigationService->>MiniApp1: Throw error
+                MiniApp1->>User: Display warning
+            end
+        else No permissions required
+            NavigationService->>ShellContext: Store appData
+            NavigationService->>Router: Navigate to '/target-path'
+            Router->>MiniApp2: Render MiniApp2
+            MiniApp2->>ShellContext: Retrieve appData
+            MiniApp2->>MiniApp2: Validate property (zod)
+            alt Data valid
+                MiniApp2->>User: Display property details
+            else Data invalid
+                MiniApp2->>User: Display error
+            end
         end
-    else Validation fails
-        ShellContext->>ShellContext: Log error (e.g., "Invalid IUser")
-        ShellContext->>MiniApp1: Prevent navigation
+    else Invalid data
+        NavigationService->>MiniApp1: Throw error (Invalid property or fields)
         MiniApp1->>User: Display warning
     end
 ```
 
-**Changes**:
-- Replaced manual `IUser` validation with `isIUser` type predicate.
-- Simplified validation step to focus on type predicate usage.
+### Changes in the Diagram
+- **checkPermissions Call**: Updated to `checkPermissions('/target-path', requiredPermissions)`, passing the path name instead of the `property` object.
+- **No API Call**: Removed the `API` participant and `fetchPermissions` call, as the permission check is now based on the path name and `requiredPermissions`.
+- **Conditional Logic**: Retained the `alt Path requires permissions` block to skip permission checks for paths without `requiredPermissions`.
 
----
+### Updated Implementation
 
-#### 7. Integration with Microfrontends
-To ensure compatibility with Module Federation (as in previous examples):
-- Share the `shared-types` package (including `IUser` and `isIUser`) across the shell and miniapps:
+Below is the revised `EntitlementService` and `NavigationService` implementation, where `checkPermissions` takes `path: string` and `requiredPermissions: string[]` as parameters. I’ve included a mock permission store for demonstration, which can be replaced with your actual permission source (e.g., API, user session).
+
+```typescript
+import { z } from 'zod';
+
+// Define schemas for ICollateralProperty
+const ICollateralPropertySchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  valuations: z.array(z.unknown()), // Placeholder, update with specific schema if provided
+  titles: z.array(z.unknown()), // Placeholder, update with specific schema if provided
+});
+
+type ICollateralProperty = z.infer<typeof ICollateralPropertySchema>;
+
+// Path configuration type
+type PathConfig = {
+  path: string;
+  requiredFields: string[];
+  requiredPermissions?: string[]; // Optional to allow paths without permission checks
+};
+
+// Sample path registry
+const pathRegistry: Record<string, PathConfig> = {
+  'target-path': {
+    path: '/target-path',
+    requiredFields: ['property', 'nabValuationId'],
+    requiredPermissions: ['view-collateral'],
+  },
+  'public-path': {
+    path: '/public-path',
+    requiredFields: ['property'],
+    // No requiredPermissions, so checkPermissions is skipped
+  },
+};
+
+// Mock permission store (replace with actual permission source, e.g., user session or API)
+const userPermissionsByPath: Record<string, string[]> = {
+  '/target-path': ['view-collateral'],
+  '/public-path': [], // No permissions needed
+};
+
+// EntitlementService to handle permission checks based on path
+export class EntitlementService {
+  constructor() {}
+
+  /**
+   * Checks if the user has all required permissions for the given path.
+   * @param path - The path to check permissions for (e.g., '/target-path').
+   * @param requiredPermissions - Array of required permissions for the path.
+   * @returns True if all permissions are present, else throws an error.
+   */
+  checkPermissions(path: string, requiredPermissions: string[]): boolean {
+    // Get user permissions for the path (mock for now)
+    const userPermissions = userPermissionsByPath[path] || [];
+
+    // Validate permissions
+    const hasPermissions = requiredPermissions.every((perm) => userPermissions.includes(perm));
+    if (!hasPermissions) {
+      throw new Error(
+        `Insufficient permissions for path ${path}: Required ${requiredPermissions.join(', ')}, but found ${userPermissions.join(', ')}`
+      );
+    }
+    return true;
+  }
+}
+
+// Updated NavigationService to apply checkPermissions only for paths with requiredPermissions
+export class NavigationService {
+  constructor(
+    private navigate: (path: string) => void,
+    private setAppData: (data: any) => void,
+    private entitlementService: EntitlementService
+  ) {}
+
+  /**
+   * Navigates to a path after validating data and permissions (if required).
+   * @param pathKey - Key in pathRegistry.
+   * @param appData - Data containing property and optional nabValuationId.
+   */
+  navigateTo(pathKey: string, appData: { property: ICollateralProperty; nabValuationId?: string }) {
+    const config = pathRegistry[pathKey];
+    if (!config) {
+      throw new Error(`Invalid pathKey: ${pathKey}`);
+    }
+
+    // Validate required fields
+    config.requiredFields.forEach((field) => {
+      if (!appData[field]) {
+        throw new Error(`Missing required field: ${field}`);
+      }
+    });
+
+    // Validate property with zod
+    const parsedProperty = ICollateralPropertySchema.safeParse(appData.property);
+    if (!parsedProperty.success) {
+      throw new Error(`Invalid property: ${parsedProperty.error.message}`);
+    }
+
+    // Validate nabValuationId if provided
+    if (appData.nabValuationId && typeof appData.nabValuationId !== 'string') {
+      throw new Error('Invalid nabValuationId: must be a string');
+    }
+
+    // Check permissions only if required by the path
+    if (config.requiredPermissions && config.requiredPermissions.length > 0) {
+      this.entitlementService.checkPermissions(config.path, config.requiredPermissions);
+    }
+
+    // Store appData and navigate
+    this.setAppData(appData);
+    this.navigate(config.path);
+  }
+}
+```
+
+### Key Changes
+1. **EntitlementService**:
+   - Updated `checkPermissions(path: string, requiredPermissions: string[])` to validate permissions based on the path name.
+   - Removed dependency on `ICollateralProperty` for permission checks.
+   - Added a mock `userPermissionsByPath` store to simulate path-based permissions. Replace this with your actual permission source (e.g., user session, API).
+   - Made `checkPermissions` synchronous for simplicity, as the mock store is static. If permissions are fetched asynchronously, I can revert to an async method.
+
+2. **NavigationService**:
+   - Calls `entitlementService.checkPermissions(config.path, config.requiredPermissions)` only if `requiredPermissions` exist for the path.
+   - Passes `config.path` (e.g., `/target-path`) instead of `property`.
+   - Removed async from `navigateTo`, as `checkPermissions` is now synchronous (can be reverted if async is needed).
+
+3. **PathRegistry**:
+   - Kept `requiredPermissions` optional to support paths like `public-path` that skip permission checks.
+   - Ensured `config.path` is passed to `checkPermissions` for path-based validation.
+
+4. **ICollateralPropertySchema**:
+   - Removed `permissions` field, as it’s no longer used for permission checks.
+   - Kept `valuations` and `titles` as placeholders (`z.unknown()`) pending your input.
+
+5. **Sequence Diagram**:
+   - Updated `checkPermissions` call to use `path` (`/target-path`) instead of `property`.
+   - Removed `API` participant, as permissions are now path-based (mock store for now).
+   - Retained conditional logic for paths with/without `requiredPermissions`.
+
+### Integration
+- **ShellContext**: No changes needed; provide `EntitlementService` and `NavigationService` as before:
+  ```typescript
+  const entitlementService = useMemo(() => new EntitlementService(), []);
+  const navigationService = useMemo(
+    () => new NavigationService(navigate, setAppData, entitlementService),
+    [navigate, setAppData]
+  );
+  ```
+- **MiniApp1**: Call `navigationService.navigateTo` as before; no changes required.
+- **MiniApp2**: Continues to validate `appData.property` with `zod` and display details or errors.
+- **Module Federation**: Share `EntitlementService` via `shared-types` package:
   ```javascript
-  // shell/webpack.config.js
   new ModuleFederationPlugin({
-    name: 'shell',
-    remotes: {
-      miniApp1: 'miniApp1@http://localhost:3001/remoteEntry.js',
-      miniApp2: 'miniApp2@http://localhost:3002/remoteEntry.js',
+    name: 'sharedTypes',
+    filename: 'remoteEntry.js',
+    exposes: {
+      './entitlementService': './src/entitlement-service.ts',
+      './types': './src/types.ts',
     },
-    shared: {
-      'shared-types': { singleton: true, eager: true },
-      react: { singleton: true },
-      'react-dom': { singleton: true },
-      'react-router-dom': { singleton: true },
-    },
+    shared: { zod: { singleton: true } },
   });
   ```
-- Miniapps import `IUser` and `isIUser` from `shared-types` for consistent validation.
 
----
+### Testing
+Sample Jest test for the updated `EntitlementService`:
 
-#### 8. Example Unit Test
 ```typescript
-// navigate.test.ts
-import { renderHook, act } from '@testing-library/react-hooks';
-import { ShellProvider, useShell } from './ShellContext';
-import { isIUser } from './types';
+describe('EntitlementService', () => {
+  const entitlementService = new EntitlementService();
 
-test('navigate validates IUser type', () => {
-  const wrapper = ({ children }) => <ShellProvider>{children}</ShellProvider>;
-  const { result } = renderHook(() => useShell(), { wrapper });
-
-  const consoleError = jest.spyOn(console, 'error').mockImplementation();
-
-  // Test invalid IUser
-  act(() => {
-    result.current.navigate('path1', {
-      required: { user: { id: 123, name: 'John' }, orderId: '456' },
-    });
+  test('should pass for valid permissions', () => {
+    expect(() => entitlementService.checkPermissions('/target-path', ['view-collateral'])).not.toThrow();
   });
-  expect(consoleError).toHaveBeenCalledWith(
-    expect.stringContaining('Invalid types for fields: user (expected IUser)')
-  );
 
-  // Test valid IUser
-  act(() => {
-    result.current.navigate('path1', {
-      required: { user: { id: '123', name: 'John' }, orderId: '456' },
-    });
+  test('should throw for insufficient permissions', () => {
+    expect(() => entitlementService.checkPermissions('/target-path', ['edit-collateral'])).toThrow(
+      /Insufficient permissions for path/
+    );
   });
-  expect(consoleError).not.toHaveBeenCalled();
+
+  test('should pass for path with no permissions', () => {
+    expect(() => entitlementService.checkPermissions('/public-path', [])).not.toThrow();
+  });
 });
 ```
 
----
+### Performance Considerations
+- **Permission Checks**: Using a static `userPermissionsByPath` ensures checks are fast (<1ms). If permissions are fetched from an API, caching is recommended.
+- **Zod Validation**: Reusing `ICollateralPropertySchema` keeps validation efficient (<10ms, per your requirement).
+- **Conditional Logic**: Skipping `checkPermissions` for paths without `requiredPermissions` reduces overhead.
 
-### Addressing Your Requirements
-- **Validate `IUser` Without Property Checks**: The `isIUser` type predicate provides a clean way to validate `IUser` instances, checking only required fields and their types.
-- **Type Safety**: TypeScript narrows the type to `IUser` after validation, ensuring safe access in destination pages.
-- **Refactoring `webPath`**: The script generates a `pathRegistry` with `IUser` as a default, minimizing manual changes.
-- **Microfrontend Compatibility**: Shared types and Module Federation ensure consistency across miniapps.
-- **Scalability**: The solution supports additional complex types by adding new type predicates.
-
----
+### Questions for You
+1. **Permission Source**: How are permissions for a path determined? Are they stored in a user session, fetched from an API, or elsewhere? Please provide details (e.g., API endpoint, session structure).
+2. **Array Types**: Can you specify the structures of `valuations` and `titles` for a refined `zod` schema?
+3. **Path Examples**: Are there specific paths or `pathRegistry` entries to include (e.g., more public or restricted paths)?
+4. **Async Needs**: Should `checkPermissions` be async (e.g., for API calls)? If so, provide API details.
+5. **Additional Features**: Need logging, analytics, or a monorepo setup?
 
 ### Next Steps
-- **Provide `IUser` Details**: If your `IUser` interface has different fields or nested structures, share them for a more precise solution.
-- **Runtime Library**: If you prefer `zod` or `io-ts` for validation, I can provide an example using one of these libraries.
-- **More Examples**: I can search for additional examples or provide a full monorepo setup with shell and miniapps.
-- **Implementation Details**: I can generate a complete codebase or focus on specific parts (e.g., refactoring script, test cases).
-
-Please let me know how you’d like to proceed or if you have additional requirements (e.g., support for other complex types, specific validation rules, or a different diagram type)!
+- Provide permission source details to replace the mock `userPermissionsByPath`.
+- Share `valuations` and `titles` structures for an updated `zod` schema.
+- Confirm if you need a monorepo, additional tests, or a refined diagram (e.g., with error cases).
