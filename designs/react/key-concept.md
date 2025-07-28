@@ -22,10 +22,10 @@ The solution enhances navigation in a TypeScript-based React microfrontend appli
 
 4. **Miniapps**:
    - **Source (MiniApp1)**: Calls `navigationService.navigateTo` with `ICollateralProperty` and `nabValuationId`, handling errors (e.g., invalid data, insufficient permissions) with user-friendly messages.
-   - **Destination (MiniApp2)**: Retrieves `appData` from `ShellContext`, validates `property` with `ICollateralPropertySchema`, and displays errors if invalid.
+   - **Destination (MiniApp2)**: Retrieves `appData` from `ShellContext`. Eg. validates `property` with `ICollateralPropertySchema`, and displays errors if invalid.
 
 5. **Refactoring Script**:
-   - Converts `webPath` (e.g., `{'path1': '/path1'}`) to `pathRegistry` with default fields (`property`, `nabValuationId`) and permissions (`view-collateral`).
+   - Converts `webPath` (e.g., `{'target-path': '/target-path'}`) to `pathRegistry` with default fields (`property`, `nabValuationId`) and permissions (`view-collateral`).
    - Minimizes manual changes for large path sets.
 
 6. **Microfrontend Compatibility**:
@@ -62,17 +62,17 @@ sequenceDiagram
     participant MiniApp2
     participant Router
 
-    User->>MiniApp1: Clicks "Navigate to Path1"
+    User->>MiniApp1: Clicks "Navigate to target-path"
     MiniApp1->>ShellContext: Access navigationService
     ShellContext-->>MiniApp1: Returns navigationService
-    MiniApp1->>NavigationService: navigateTo('path1', collateralProperty: { id, status, valuations, titles }, nabValuationId })
+    MiniApp1->>NavigationService: navigateTo('/target-path', collateralProperty: { id, status, valuations, titles }, nabValuationId })
     
-    NavigationService->>PathRegistry: Look up 'path1'
+    NavigationService->>PathRegistry: Look up 'target-path'
     PathRegistry-->>NavigationService: Returns path config
     NavigationService->>NavigationService: Validate fields (zod) and permissions
     alt Valid data and permissions
         NavigationService->>ShellContext: Store appData
-        NavigationService->>Router: Navigate to '/path1'
+        NavigationService->>Router: Navigate to '/target-path'
         Router->>MiniApp2: Render MiniApp2
         MiniApp2->>ShellContext: Retrieve appData
         MiniApp2->>MiniApp2: Validate property (zod)
@@ -93,5 +93,3 @@ sequenceDiagram
 - **Implementation**: I can provide a full monorepo, additional tests, or Module Federation setup.
 - **Refactoring**: Share a sample `webPath` for a tailored script.
 - **Further Requirements**: Let me know if you need additional features (e.g., logging enhancements, other services).
-
-Please confirm if this summary aligns with your needs or provide details for further refinements!
